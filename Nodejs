@@ -1,38 +1,68 @@
-// app.js - Node.js server for a browser-based code editor
-
+// Importing required modules
 const express = require('express');
+const bodyParser = require('body-parser');
+const { exec } = require('child_process');
 const path = require('path');
-const fs = require('fs');
 
+// Initialize Express app
 const app = express();
-const PORT = 3000;
+const PORT = process.env.PORT || 3000;
 
-// Serve static files from the 'public' directory
+// Middleware
+app.use(bodyParser.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Middleware to parse JSON data
-app.use(express.json());
+// Route to handle execution of code
+app.post('/execute', (req, res) => {
+    const { language, code } = req.body;
 
-// Endpoint to save files
-app.post('/save', (req, res) => {
-  const { filename, content } = req.body;
-
-  if (!filename || !content) {
-    return res.status(400).send('Filename and content are required.');
-  }
-
-  const filePath = path.join(__dirname, 'files', filename);
-
-  fs.writeFile(filePath, content, (err) => {
-    if (err) {
-      console.error(err);
-      return res.status(500).send('Failed to save the file.');
+    if (!language || !code) {
+        return res.status(400).json({ error: 'Language and code are required' });
     }
-    res.send('File saved successfully.');
-  });
+
+    // File and command setup based on language
+    const tempFileName = `temp_code.${language === 'javascript' ? 'js' : language}`;
+    const fs = require('fs');
+    fs.writeFileSync(tempFileName, code);
+
+    let command = '';
+    switch (language) {
+        case 'javascript':
+            command = `node ${tempFileName}`;
+            break;
+        case 'python':
+            command = `python3 ${tempFileName}`;
+            break;
+        case 'c':
+            command = `gcc ${tempFileName} -o temp_code && ./temp_code`;
+            break;
+        case 'cpp':
+            command = `g++ ${tempFileName} -o temp_code && ./temp_code`;
+            break;
+        default:
+            return res.status(400).json({ error: `Unsupported language: ${language}` });
+    }
+
+    // Execute the code
+    exec(command, (err, stdout, stderr) => {
+        // Clean up the temporary file
+        fs.unlinkSync(tempFileName);
+        if (fs.existsSync('temp_code')) fs.unlinkSync('temp_code');
+
+        if (err) {
+            return res.status(500).json({ error: stderr || err.message });
+        }
+
+        res.json({ output: stdout });
+    });
 });
 
-// Start the server
+// Homepage route
+app.get('/', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
+
+// Start server
 app.listen(PORT, () => {
-  console.log(`Server is running at http://localhost:${PORT}`);
+    console.log(`Code server running at http://localhost:${PORT}`);
 });
